@@ -11,7 +11,7 @@ Requirements:
   - EFI system partition (100 MB should be enough)
   - Swap partition (optional)
   - Linux filesystem partition
-- UEFI-compliant computer with 64-bits CPU
+- UEFI-compliant computer with x86-64 CPU
 
 How to run the installer:
 
