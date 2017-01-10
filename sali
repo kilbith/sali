@@ -1,0 +1,280 @@
+#!/bin/bash
+
+exit_error() { printf "\n\e[1m\e[31m${1}.\e[0m"; exit 1; }
+chr() { arch-chroot /mnt /bin/bash -c "${1}"; }
+
+
+# extra packages
+declare -A pkg=(
+    ["base"]="		    \
+	adwaita-icon-theme  \
+    	arch-wiki-lite	    \
+    	atool		    \
+	bash-completion	    \
+	bc		    \
+	chromium	    \
+	dosfstools	    \
+	gimp		    \
+	git		    \
+	htop		    \
+	lftp		    \
+	mesa-libgl	    \
+	mtools		    \
+	neovim		    \
+	networkmanager	    \
+	noto-fonts	    \
+	ntfs-3g		    \
+    	rsync		    \
+	p7zip		    \
+	tree		    \
+	ttf-dejavu	    \
+	unrar		    \
+	unzip		    \
+	vlc		    \
+	w3m		    \
+	wget		    \
+	xclip		    \
+	xdg-user-dirs	    \
+	xf86-input-libinput \
+    	xorg-server	    \
+	xorg-xbacklight     \
+	xorg-xinit	    \
+    "
+
+    ["i3"]="		 \
+    	dunst		 \
+	feh		 \
+	highlight	 \
+	i3-wm		 \
+	i3status	 \
+	lxappearance	 \
+	ponymix		 \
+    	ranger		 \
+	rofi		 \
+	rtorrent	 \
+	rxvt-unicode	 \
+	scrot		 \
+	udiskie		 \
+	weechat		 \
+    "
+
+    ["xfce"]="			   \
+    	geany			   \
+	gparted			   \
+	gvfs			   \
+	gvfs-gphoto2		   \
+	gvfs-mtp		   \
+	gvfs-nfs		   \
+	gvfs-smb		   \
+	hexchat			   \
+    	qt4			   \
+	mousepad		   \
+	network-manager-applet	   \
+	ristretto		   \
+	thunar-archive-plugin	   \
+    	transmission-gtk	   \
+	ttf-ubuntu-font-family	   \
+	xdg-user-dirs-gtk	   \
+	xfburn			   \
+    	xfce4			   \
+    	xfce4-battery-plugin	   \
+	xfce4-clipman-plugin	   \
+	xfce4-notes-plugin	   \
+	xfce4-notifyd-plugin	   \
+	xfce4-screenshooter-plugin \
+	xfce4-taskmanager-plugin   \
+	xfce4-wavelan-plugin	   \
+	xfce4-whiskermenu-plugin   \
+	xfce4-xkb-plugin	   \
+    "
+)
+
+
+# check if Linux partition exists
+chk_root_part() {
+    rt=$(fdisk -l | grep "Linux filesystem" | awk '{print $1}' | tail -1)
+    if [[ $rt ]]; then
+	echo; fdisk -l ${rt:0:8}; echo
+    else
+	printf "\nNo Linux filesystem found. Open \e[1mcfdisk\e[0m to create one? [Y/n] "; read disk
+	case $disk in
+	    N|n) exit_error "Installation aborted";;
+            *) cfdisk;;
+	esac
+    fi
+}
+
+
+# user selections
+user_info() {
+    clear
+    while [[ -z "$user" ]]; do printf "User name: "; read user; done
+    while [[ -z "$host" ]]; do printf "Host name: "; read host; done
+    while [[ -z "$pass" ]]; do printf "Password: "; read pass; done
+
+
+    # desktop environment selection
+    env_tot=$(expr ${#pkg[@]} - 1)
+    while [[ -z "$env" ]] || ! [[ "$env" =~ ^[0-9]+$ ]] ||
+	    [ "$env" -lt 1 -o "$env" -gt $env_tot ]; do
+	i=0; declare -a env_i=(); echo
+	for env_l in "${!pkg[@]}"; do
+	    if [[ "$env_l" == "base" ]]; then continue; fi
+	    i=$(($i+1))
+	    env_i+=($env_l)
+	    printf "\e[1m$i\e[0m - $env_l\n"
+	done;
+	printf "\nSelect an environment [1-$env_tot]: "; read env
+    done
+    env_name=${env_i[$(expr $env - 1)]}
+
+
+    # locale selection
+    #pacman -S whois --needed --noconfirm -q &>/dev/null
+    #country_code=$(whois `curl -s kilbith.free.fr/ip.php` | awk -F':[ \t]+' 'tolower($1) ~ /^country$/ { print toupper($2) }')
+    country_code=$(wget -O - -q http://geoip.ubuntu.com/lookup | sed -n -e 's/.*<CountryCode>\(.*\)<\/CountryCode>.*/\1/p')
+    country_code_l=${country_code,,}
+
+    grep -e "^#${country_code_l}_" /etc/locale.gen > locales.txt
+    sed -i 's/#//' locales.txt
+
+    mapfile -t locales < locales.txt
+    echo; i=0; for str in "${locales[@]}"; do
+	i=$(($i+1))
+	printf "\e[1m$i\e[0m - $str\n"
+    done
+
+    locales_tot=${#locales[@]}
+    while [[ -z "$locale_num" ]] ||
+	    ! [ "$locale_num" -ge 1 -a "$locale_num" -le "$locales_tot" ]; do
+	printf "\nSelect a locale [1-"$locales_tot"]: "; read locale_num
+    done
+    locale=$(sed -n "${locale_num}p" locales.txt)
+    locale_s=$(echo $locale | awk '{print $1}')
+
+
+    # confirmation
+    printf "\nUser name: \e[1m$user\e[0m\nHost name: \e[1m$host\e[0m\nPassword: \
+\e[1m$pass\e[0m\nEnvironment: \e[1m$env_name\e[0m\nLocale: \e[1m$locale\e[0m\n\nConfirm? [Y/n] "
+    read confirm
+
+    case $confirm in
+        N|n) user=""; host=""; pass=""; confirm="";
+	     env=""; env_name=""; locale_num=""; locale=""; user_info;;
+    esac
+}
+
+
+# GRUB EFI install
+install_grub_efi() {
+    chr "pacman -S --noconfirm efibootmgr grub os-prober"
+    chr "grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=arch_grub --recheck"
+    chr "grub-mkconfig -o /boot/grub/grub.cfg"
+}
+
+
+# systemd-boot install
+install_systemdboot() {
+    chr "bootctl --path=/boot install"
+
+    part_root_uuid=$(blkid $part_root | awk '{print $4}')
+
+cat >> /mnt/boot/loader/entries/arch.conf <<_EOF_
+title Arch Linux
+linux vmlinuz-linux
+initrd initramfs-linux.img
+options root=$part_root_uuid rw
+_EOF_
+
+    echo "default arch" > /mnt/boot/loader/loader.conf
+}
+
+
+# entry point
+clear
+for i in {6..1}; do
+    echo -ne "\e[1mArch Linux\e[0m installation will begin in "$i"s..."'\r';
+sleep 1; done; echo
+
+
+# partitioning stuff
+while [[ -z "$rt" ]]; do chk_root_part; done
+
+if [[ `fdisk -l | grep -i EFI` ]]; then
+    efi=$(fdisk -l | grep EFI | awk '{print $1}' | tail -1)
+fi
+
+if [[ `fdisk -l | grep -i swap` ]]; then
+    swp=$(fdisk -l | grep swap | awk '{print $1}' | tail -1)
+fi
+
+[[ $efi ]] && printf "\nPartition \e[1mboot\e[0m on: " && read -ei $efi part_efi
+[[ $swp ]] && printf "Partition \e[1mswap\e[0m on: " && read -ei $swp part_swap
+[[ $rt ]] && printf "Partition \e[1mroot\e[0m on: " && read -ei $rt part_root
+
+[[ $part_efi ]] && printf "\nInstall \e[1mGRUB\e[0m? [y/N] "; read grub
+[[ $part_efi ]] && mkfs.vfat -F32 $part_efi
+
+[[ $part_swap ]] && mkswap $part_swap && swapon $part_swap
+
+[[ $part_root ]] && mkfs.ext4 $part_root
+[[ $part_root ]] && mount $part_root /mnt; mkdir /mnt/{boot,home}
+
+[[ $part_efi ]] && mount -t vfat $part_efi /mnt/boot
+
+
+user_info
+
+
+# mirror configuration
+curl -so "mirrorlist" "https://www.archlinux.org/mirrorlist/?country=$country_code&use_mirror_status=on"
+sed -i -e '19,$d' mirrorlist; sed -i 's/^#Server/Server/g' mirrorlist
+mv mirrorlist /etc/pacman.d/mirrorlist
+cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/
+chmod +r /mnt/etc/pacman.d/mirrorlist
+
+
+# base installation
+pacstrap /mnt base base-devel
+genfstab -U -p /mnt >> /mnt/etc/fstab
+
+
+# bootloading stuff
+case $grub in
+    Y|y) install_grub_efi;;
+    *) install_systemdboot;;
+esac
+[[ $part_efi ]] || (grub-install ${rt:0:8} && grub-mkconfig -o /mnt/boot/grub/grub.cfg)
+
+
+# localization
+sed -i "/${locale}/s/^#//" /mnt/etc/locale.gen
+printf "LANG=$locale_s\nLC_COLLATE=C" > /mnt/etc/locale.conf
+printf "KEYMAP=$country_code_l\nFONT=lat9w-16" > /mnt/etc/vconsole.conf
+chr "locale-gen"
+
+TZ=$(wget -O - -q http://geoip.ubuntu.com/lookup | sed -n -e 's/.*<TimeZone>\(.*\)<\/TimeZone>.*/\1/p')
+ln -sf /mnt/usr/share/zoneinfo/$TZ /mnt/etc/localtime
+
+
+# extra packages install
+chr "pacman -Syy; pacman -S ${pkg["base"]} ${pkg[$env_name]} --noconfirm"
+chr "pacman -Rnsc nano vi --noconfirm"
+
+
+# user account configuration
+echo $host > /mnt/etc/hostname
+chr "useradd -m -G wheel -s /bin/bash $user"
+chr "printf '$pass\n$pass' | passwd $user"
+sed -i '/%wheel ALL=(ALL) ALL/s/^#//' /mnt/etc/sudoers
+
+
+# finish gracefully
+umount -R /mnt
+
+clear
+for i in {6..1}; do
+    echo -ne "\e[1m\e[32mInstallation completed.\e[0m Rebooting in "$i"s."'\r';
+sleep 1; done; echo
+
+reboot
