@@ -259,7 +259,6 @@ ln -sf /mnt/usr/share/zoneinfo/$TZ /mnt/etc/localtime
 
 # extra packages install
 chr "pacman -Syy; pacman -S ${pkg["base"]} ${pkg[$env_name]} --noconfirm"
-chr "pacman -Rnsc nano vi --noconfirm"
 
 
 # user account configuration
