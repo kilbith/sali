@@ -7,19 +7,18 @@ chr() { arch-chroot /mnt /bin/bash -c "${1}"; }
 # extra packages
 declare -A pkg=(
     ["base"]="		    \
-	adwaita-icon-theme  \
     	arch-wiki-lite	    \
     	atool		    \
 	bash-completion	    \
 	bc		    \
 	chromium	    \
 	dosfstools	    \
-	gimp		    \
 	git		    \
 	htop		    \
 	lftp		    \
 	mesa-libgl	    \
 	mtools		    \
+	mtpaint		    \
 	neovim		    \
 	networkmanager	    \
 	noto-fonts	    \
@@ -221,15 +220,15 @@ user_info
 # mirror configuration
 curl -so "mirrorlist" "https://www.archlinux.org/mirrorlist/?country=$country_code&use_mirror_status=on"
 sed -i -e '19,$d' mirrorlist; sed -i 's/^#Server/Server/g' mirrorlist
-mv mirrorlist /etc/pacman.d/mirrorlist
-cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/
-chmod +r /mnt/etc/pacman.d/mirrorlist
+cp mirrorlist /etc/pacman.d/
 
 
 # base installation
 pacstrap /mnt base base-devel
 genfstab -U -p /mnt >> /mnt/etc/fstab
 
+cp mirrorlist /mnt/etc/pacman.d/
+chmod +r /mnt/etc/pacman.d/mirrorlist
 
 # bootloading stuff
 case $grub in
