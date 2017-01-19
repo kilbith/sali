@@ -229,6 +229,7 @@ genfstab -U -p /mnt >> /mnt/etc/fstab
 
 cp mirrorlist /mnt/etc/pacman.d/
 chmod +r /mnt/etc/pacman.d/mirrorlist
+sed -i 's/^#Color/Color/g' /mnt/etc/pacman.conf
 
 # bootloading stuff
 case $grub in
